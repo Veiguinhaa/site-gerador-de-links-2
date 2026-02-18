@@ -65,7 +65,7 @@ function jitter(ms, pct = 0.35) {
 // ✅ delay “humano” p/ lote (10 links)
 async function politeDelay() {
   // ~4s a 8s
-  await sleep(jitter(6000, 0.35));
+  await sleep(jitter(1500, 0.4));
 }
 
 // ✅ Detecta bloqueio/captcha/consent
@@ -427,29 +427,33 @@ async function extrair(link) {
   };
 }
 
-// ================= stdin -> links =================
-let input = '';
-const rl = readline.createInterface({ input: process.stdin });
+module.exports = { extrair };
 
-rl.on('line', (line) => { input += line + '\n'; });
+// ✅ Só roda o modo CLI (stdin) quando executar: node extrair.js
+if (require.main === module) {
+  // ================= stdin -> links =================
+  let input = '';
+  const rl = readline.createInterface({ input: process.stdin });
 
-rl.on('close', async () => {
-  const links = input.split('\n').map(l => l.trim()).filter(Boolean);
+  rl.on('line', (line) => { input += line + '\n'; });
 
-  let resultado = '';
-  let count = 0;
+  rl.on('close', async () => {
+    const links = input.split('\n').map(l => l.trim()).filter(Boolean);
 
-  for (const link of links) {
-    count++;
+    let resultado = '';
+    let count = 0;
 
-    try {
-      const d = await extrair(link);
+    for (const link of links) {
+      count++;
 
-      const avisoNovoLink = d.precisaGerarOutroLink
-        ? '\n⚠️ Não consegui ler corretamente. Tente novamente em 1 minuto, ou use o link completo (amazon.com.br/dp/ASIN).'
-        : '';
+      try {
+        const d = await extrair(link);
 
-      resultado +=
+        const avisoNovoLink = d.precisaGerarOutroLink
+          ? '\n⚠️ Não consegui ler corretamente. Tente novamente em 1 minuto, ou use o link completo (amazon.com.br/dp/ASIN).'
+          : '';
+
+        resultado +=
 `${d.titulo || '❌ Não foi possível ler o título'}
 Link: ${link}
 ${d.linhaPreco || '*Preço: ❌ Não foi possível ler o preço*'}
@@ -458,12 +462,12 @@ ${d.foto ? `Foto: ${d.foto}` : ''}${avisoNovoLink}
 ⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.
 
 `;
-    } catch (err) {
-      const status = err?.response?.status;
-      const code = err?.code;
-      const msg = err?.message || String(err);
+      } catch (err) {
+        const status = err?.response?.status;
+        const code = err?.code;
+        const msg = err?.message || String(err);
 
-      resultado +=
+        resultado +=
 `❌ Erro ao acessar:
 Link: ${link}
 Detalhes: ${status ? `HTTP ${status} - ` : ''}${code ? `${code} - ` : ''}${msg}
@@ -471,13 +475,13 @@ Detalhes: ${status ? `HTTP ${status} - ` : ''}${code ? `${code} - ` : ''}${msg}
 ⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.
 
 `;
+      }
+
+      if (count % 3 === 0 && count < links.length) {
+        await sleep(12000);
+      }
     }
 
-    // ✅ pausa extra a cada 3 links (pra você enviar 10 de uma vez)
-    if (count % 3 === 0 && count < links.length) {
-      await sleep(12000);
-    }
-  }
-
-  console.log(resultado.trim());
-});
+    console.log(resultado.trim());
+  });
+}
