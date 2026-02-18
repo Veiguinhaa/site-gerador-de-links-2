@@ -55,9 +55,24 @@ async function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+// ✅ Detecta quando o HTML não é uma página de produto, mas sim bloqueio/consent/captcha
+function isBlockedHtml(html) {
+  const h = String(html || '').toLowerCase();
+  return (
+    h.includes('robot check') ||
+    h.includes('captcha') ||
+    h.includes('automated access') ||
+    h.includes('unusual traffic') ||
+    h.includes('to discuss automated access') ||
+    h.includes('enter the characters you see below') ||
+    h.includes('sorry, we just need to make sure') ||
+    h.includes('enable cookies') ||
+    h.includes('consent') && h.includes('privacy') // pages de consent também atrapalham
+  );
+}
+
 /**
  * Busca HTML seguindo redirects e retorna também a URL FINAL.
- * Isso é essencial para links ML /sec/...
  */
 async function fetchHtmlWithRetry(url, tries = 3) {
   let lastErr = null;
@@ -71,16 +86,17 @@ async function fetchHtmlWithRetry(url, tries = 3) {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
           'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.7',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
         }
       });
 
-      // URL final após redirects
       const finalUrl =
         resp?.request?.res?.responseUrl ||
         resp?.request?.path ||
         url;
 
-      return { html: resp.data, finalUrl };
+      return { html: resp.data, finalUrl, status: resp.status, headers: resp.headers };
     } catch (e) {
       lastErr = e;
       await sleep(800 + i * 1000);
@@ -93,12 +109,10 @@ function detectSite(link, html) {
   const l = link.toLowerCase();
   const h = String(html || '').toLowerCase();
 
-  // Mercado Livre: suporta .com e .com.br e /sec/
   if (l.includes('mercadolivre.') || l.includes('mercadolibre.') || h.includes('mercadolivre') || h.includes('mercadolibre')) {
     return 'ml';
   }
 
-  // Amazon (não mexer)
   if (l.includes('amazon.') || l.includes('amzn.to') || h.includes('amazon')) {
     return 'amazon';
   }
@@ -156,7 +170,19 @@ function amazonGetOldPrice($) {
   ]);
 }
 
-async function extrairAmazon(link, html) {
+// ✅ Pequena mudança: usar baseUrl (finalUrl) ao invés do link curto
+async function extrairAmazon(baseUrl, html) {
+  // Se vier bloqueio/captcha/consent, retorna aviso claro
+  if (isBlockedHtml(html)) {
+    return {
+      titulo: '❌ Amazon bloqueou a leitura (anti-bot)',
+      linhaPreco: '*Preço: ❌ Não foi possível ler o preço*',
+      foto: '',
+      precisaGerarOutroLink: true,
+      motivo: 'BLOCKED'
+    };
+  }
+
   const $ = cheerio.load(html);
 
   const titulo = pickFirstText($, ['#productTitle', 'h1 span.a-size-large', 'span#title']);
@@ -170,16 +196,30 @@ async function extrairAmazon(link, html) {
     '';
 
   if (!foto) {
-    foto = pickFirstAttr($, ['img#imgBlkFront', 'img.a-dynamic-image', 'div#imgTagWrapperId img'], 'src', link);
+    foto = pickFirstAttr($, ['img#imgBlkFront', 'img.a-dynamic-image', 'div#imgTagWrapperId img'], 'src', baseUrl);
   } else {
-    foto = absolutizar(foto, link);
+    foto = absolutizar(foto, baseUrl);
   }
 
   const desconto = calcularDesconto(precoDe, precoAtual);
-  let linhaPreco = `*Preço: ${precoAtual || '❌ Não foi possível ler o preço'}*`;
-  if (precoDe && desconto) linhaPreco = `*Preço: ${precoAtual} (De: ${precoDe} | ${desconto})*`;
 
-  return { titulo, linhaPreco, foto };
+  // ✅ Mensagem padrão quando falhar leitura
+  const falhouTitulo = !titulo;
+  const falhouPreco = !precoAtual;
+
+  let linhaPreco = `*Preço: ${precoAtual || '❌ Não foi possível ler o preço'}*`;
+  if (precoDe && desconto && precoAtual) linhaPreco = `*Preço: ${precoAtual} (De: ${precoDe} | ${desconto})*`;
+
+  // ✅ Se falhou título ou preço, pede novo link (ou link completo)
+  const precisaGerarOutroLink = falhouTitulo || falhouPreco;
+
+  return {
+    titulo: titulo || '❌ Não foi possível ler o título',
+    linhaPreco,
+    foto,
+    precisaGerarOutroLink,
+    motivo: precisaGerarOutroLink ? 'PARSE_FAILED' : ''
+  };
 }
 
 // ======================= MERCADO LIVRE (SEC + JSON-LD) =======================
@@ -224,22 +264,21 @@ function findProductNode(node) {
 }
 
 async function extrairML(originalLink) {
-  // 1) busca seguindo redirect e pega a URL final
   const { html, finalUrl } = await fetchHtmlWithRetry(originalLink, 3);
 
-  // bloqueio/consent (às vezes)
   const low = String(html).toLowerCase();
   if (low.includes('enable javascript') || low.includes('unusual traffic') || low.includes('robot')) {
     return {
       titulo: '❌ Mercado Livre bloqueou o acesso',
       linhaPreco: '*Preço: ❌ Não foi possível ler o preço*',
-      foto: ''
+      foto: '',
+      precisaGerarOutroLink: true,
+      motivo: 'BLOCKED'
     };
   }
 
   const $ = cheerio.load(html);
 
-  // 2) tenta JSON-LD
   const product = parseJsonLdProduct($);
 
   let titulo = '';
@@ -265,7 +304,6 @@ async function extrairML(originalLink) {
     foto = absolutizar((foto || '').trim(), finalUrl);
   }
 
-  // 3) fallback HTML
   if (!titulo) titulo = pickFirstText($, ['h1.ui-pdp-title', 'h1']);
 
   if (!precoAtual) {
@@ -297,27 +335,31 @@ async function extrairML(originalLink) {
   let linhaPreco = `*Preço: ${precoAtual || '❌ Não foi possível ler o preço'}*`;
   if (precoDe && desconto) linhaPreco = `*Preço: ${precoAtual} (De: ${precoDe} | ${desconto})*`;
 
-  return { titulo, linhaPreco, foto };
+  const precisaGerarOutroLink = !titulo || !precoAtual;
+
+  return { titulo, linhaPreco, foto, precisaGerarOutroLink, motivo: precisaGerarOutroLink ? 'PARSE_FAILED' : '' };
 }
 
 async function extrair(link) {
-  // Aqui a gente só detecta o site; para ML a função já cuida de redirect internamente.
-  const { html } = await fetchHtmlWithRetry(link, 2);
-  const site = detectSite(link, html);
+  // ✅ pega HTML e URL final (resolve amzn.to)
+  const { html, finalUrl } = await fetchHtmlWithRetry(link, 2);
+  const site = detectSite(finalUrl || link, html);
 
   if (site === 'amazon') {
-    // Amazon usa o HTML já buscado acima (não mexer)
-    return await extrairAmazon(link, html);
+    // ✅ usa URL final como base
+    return await extrairAmazon(finalUrl || link, html);
   }
 
   if (site === 'ml') {
-    return await extrairML(link);
+    return await extrairML(finalUrl || link);
   }
 
   return {
     titulo: '❌ Site não suportado',
     linhaPreco: '*Preço: ❌ Não foi possível ler o preço*',
-    foto: ''
+    foto: '',
+    precisaGerarOutroLink: true,
+    motivo: 'UNSUPPORTED'
   };
 }
 
@@ -336,11 +378,15 @@ rl.on('close', async () => {
     try {
       const d = await extrair(link);
 
+      const avisoNovoLink = d.precisaGerarOutroLink
+        ? '\n⚠️ Não consegui ler corretamente. Gere outro link (ou use o link completo do produto).'
+        : '';
+
       resultado +=
 `${d.titulo || '❌ Não foi possível ler o título'}
 Link: ${link}
 ${d.linhaPreco || '*Preço: ❌ Não foi possível ler o preço*'}
-${d.foto ? `Foto: ${d.foto}` : ''}
+${d.foto ? `Foto: ${d.foto}` : ''}${avisoNovoLink}
 
 ⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.
 
