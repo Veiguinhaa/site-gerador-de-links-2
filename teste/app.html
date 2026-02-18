@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LinkGen (Teste) — App</title>
+  <link rel="stylesheet" href="./assets/css/app.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand side">
+        <div class="logo">LG</div>
+        <div>
+          <div class="brand-name">LinkGen</div>
+          <div class="brand-sub">app (teste)</div>
+        </div>
+      </div>
+
+      <nav class="menu">
+        <a class="menu-item active" href="./app.html"><span>Links</span></a>
+        <a class="menu-item" href="#" onclick="alert('Em breve: Templates'); return false;"><span>Templates</span></a>
+        <a class="menu-item" href="#" onclick="alert('Em breve: Integrações'); return false;"><span>Integrações</span></a>
+        <a class="menu-item" href="#" onclick="alert('Em breve: Configurações'); return false;"><span>Configurações</span></a>
+        <div class="menu-sep"></div>
+        <a class="menu-item admin" href="./admin.html"><span>Admin</span><span class="badge">mock</span></a>
+      </nav>
+
+      <div class="side-footer">
+        <div class="muted small">Ambiente: <b>teste</b></div>
+        <a class="btn ghost full" href="./index.html">Voltar</a>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="search">
+          <input id="q" placeholder="Buscar no histórico..." />
+        </div>
+        <div class="top-actions">
+          <button class="btn ghost" id="btnExport">Exportar TXT</button>
+          <button class="btn" id="btnNew">Novo</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Gerar cards</h2>
+              <p class="muted">Cole links (um por linha). Usa o mesmo <code>/processar</code> do site principal.</p>
+            </div>
+          </div>
+
+          <textarea id="links" class="textarea" placeholder="Cole os links aqui, um por linha"></textarea>
+
+          <div class="row-actions">
+            <button class="btn" id="btnGerar">Gerar</button>
+            <button class="btn ghost" id="btnSalvar">Salvar histórico</button>
+            <button class="btn ghost" id="btnLimpar">Limpar</button>
+          </div>
+
+          <div id="status" class="status"></div>
+
+          <div class="hint">⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.</div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Resultado</h2>
+              <p class="muted">Cards gerados a partir do texto retornado pelo extrair.js.</p>
+            </div>
+          </div>
+          <div id="cards" class="cards"></div>
+          <div id="empty" class="empty">
+            <div class="muted">Nenhum resultado ainda. Clique em <b>Gerar</b>.</div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Histórico</h2>
+              <p class="muted">Salvo no seu navegador (localStorage). Não mexe em nada do servidor.</p>
+            </div>
+          </div>
+
+          <div class="table">
+            <div class="table-head">
+              <div>Item</div>
+              <div class="right">Ações</div>
+            </div>
+            <div id="list" class="table-body"></div>
+          </div>
+
+          <div id="emptyList" class="empty-list">
+            <div class="muted">Nada salvo ainda.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="./assets/js/app.js"></script>
+</body>
+</html>

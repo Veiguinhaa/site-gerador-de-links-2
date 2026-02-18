@@ -1,0 +1,16 @@
+{
+  "name": "site-gerador-de-links",
+  "version": "2.0.0",
+  "description": "Site gerador de links com extração automática",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "express": "^4.18.2",
+    "multer": "1.4.5-lts.1",
+    "express-rate-limit": "^7.1.5"
+  }
+}

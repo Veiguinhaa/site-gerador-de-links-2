@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gerador de Produtos</title>
+
+<style>
+* { box-sizing: border-box; }
+body { margin:0; font-family:Segoe UI, Arial, sans-serif; background:linear-gradient(135deg,#020617,#0f172a); color:#e5e7eb; min-height:100vh; }
+.app { max-width: 980px; margin:auto; padding:28px; }
+h1 { text-align:center; margin:0 0 6px 0; }
+.sub { text-align:center; color:#9ca3af; margin:0 0 18px 0; }
+
+.panel { background:#020617; border:1px solid #1e293b; border-radius:14px; padding:16px; }
+textarea { width:100%; height:120px; background:#0b1220; color:#e5e7eb; border:1px solid #1e293b; border-radius:12px; padding:12px; font-size:14px; resize:vertical; }
+
+.row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.btn { padding:12px 14px; border-radius:12px; border:1px solid #334155; background:#1e293b; color:#e5e7eb; cursor:pointer; font-weight:700; }
+.btn.primary { background:linear-gradient(135deg,#22c55e,#16a34a); border:none; color:#022c22; }
+.btn:disabled { opacity:0.6; cursor:not-allowed; }
+
+.loader { margin-top:12px; color:#38bdf8; font-weight:700; display:none; }
+.small { color:#94a3b8; font-size:12px; margin-top:10px; }
+
+.cards { margin-top:18px; display:grid; gap:14px; }
+.card { background:#020617; border:1px solid #1e293b; border-radius:14px; padding:14px; }
+.card h3 { margin:0 0 10px 0; font-size:16px; line-height:1.3; }
+.line { margin:6px 0; font-size:14px; line-height:1.4; }
+.card a { color:#38bdf8; text-decoration:none; }
+.card a:hover { text-decoration:underline; }
+
+.foto { margin:10px 0 10px 0; display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+.foto img { max-width:140px; border-radius:10px; border:1px solid #1e293b; background:#0b1220; }
+
+.actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.actions .btn { flex:1; min-width:180px; }
+
+.badge { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:800; border:1px solid #334155; background:#0b1220; color:#e5e7eb; }
+.badge.ok { border-color:#14532d; background:#052e1b; color:#86efac; }
+.badge.err { border-color:#7f1d1d; background:#2a0b0b; color:#fca5a5; }
+
+.toast { margin-top:12px; display:none; background:#0b1220; border:1px solid #334155; border-radius:12px; padding:10px 12px; color:#e5e7eb; }
+
+.footer { margin:26px 0 0 0; text-align:center; color:#64748b; font-size:12px; }
+</style>
+</head>
+
+<body>
+<div class="app">
+  <h1>🔗 Gerador de Produtos</h1>
+  <p class="sub">Cole links (um por linha). O site gera mensagem pronta + foto.</p>
+
+  <div class="panel">
+    <textarea id="links" placeholder="Cole os links aqui, um por linha"></textarea>
+
+    <div class="row">
+      <button id="btnGerar" class="btn primary">Gerar</button>
+      <button id="btnSalvar" class="btn">Salvar no histórico</button>
+      <button id="btnExportar" class="btn">Exportar TXT</button>
+      <button id="btnLimpar" class="btn">Limpar</button>
+    </div>
+
+    <div id="loader" class="loader">⏳ Processando...</div>
+    <div id="toast" class="toast"></div>
+
+    <div class="small">
+      Dica: clique em <b>Copiar mensagem</b> e <b>Baixar foto</b> para enviar no WhatsApp.
+    </div>
+  </div>
+
+  <div id="cards" class="cards"></div>
+
+  <div class="footer">Online 24/7 • Sem recarregar página</div>
+</div>
+
+<script>
+const btnGerar = document.getElementById('btnGerar');
+const btnSalvar = document.getElementById('btnSalvar');
+const btnExportar = document.getElementById('btnExportar');
+const btnLimpar = document.getElementById('btnLimpar');
+const linksEl = document.getElementById('links');
+const loader = document.getElementById('loader');
+const cards = document.getElementById('cards');
+const toast = document.getElementById('toast');
+
+const AVISO = '⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.';
+
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 1800);
+}
+
+btnLimpar.addEventListener('click', () => {
+  linksEl.value = '';
+  cards.innerHTML = '';
+  showToast('Limpo ✅');
+});
+
+btnGerar.addEventListener('click', async () => {
+  const links = linksEl.value.trim();
+  if (!links) return showToast('Cole pelo menos 1 link.');
+
+  btnGerar.disabled = true;
+  loader.style.display = 'block';
+  cards.innerHTML = '';
+
+  try {
+    const formData = new FormData();
+    formData.append('links', links);
+
+    const resp = await fetch('/processar', { method: 'POST', body: formData });
+    const texto = await resp.text();
+
+    renderCards(texto);
+    showToast('Gerado ✅');
+  } catch (e) {
+    console.error(e);
+    showToast('Falha ao processar ❌');
+  } finally {
+    btnGerar.disabled = false;
+    loader.style.display = 'none';
+  }
+});
+
+btnSalvar.addEventListener('click', () => {
+  const html = cards.innerHTML.trim();
+  if (!html) return showToast('Nada para salvar.');
+  const hist = JSON.parse(localStorage.getItem('hist_links') || '[]');
+  hist.unshift({ ts: Date.now(), links: linksEl.value, html });
+  localStorage.setItem('hist_links', JSON.stringify(hist.slice(0, 20)));
+  showToast('Salvo no histórico ✅');
+});
+
+btnExportar.addEventListener('click', () => {
+  const itens = document.querySelectorAll('.card');
+  if (!itens.length) return showToast('Nada para exportar.');
+
+  let txt = '';
+  itens.forEach(card => {
+    const titulo = card.querySelector('h3')?.innerText || '';
+    const link = card.querySelector('a')?.innerText || '';
+    const preco = card.querySelector('[data-preco]')?.innerText || '';
+    txt += `${titulo}\nLink: ${link}\n${preco}\n\n${AVISO}\n\n`;
+  });
+
+  const blob = new Blob([txt.trim()], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'mensagens.txt';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  showToast('TXT baixado ✅');
+});
+
+function renderCards(texto) {
+  // cada bloco termina no aviso
+  const blocos = texto.split(AVISO).map(x => x.trim()).filter(Boolean);
+
+  blocos.forEach(bloco => {
+    const linhas = bloco.split('\n').map(x => x.trim()).filter(Boolean);
+
+    const titulo = linhas[0] || '—';
+    const linkLinha = linhas.find(l => l.toLowerCase().startsWith('link:')) || '';
+    const precoLinha = linhas.find(l => l.toLowerCase().startsWith('*preço:')) || linhas.find(l => l.toLowerCase().startsWith('preço:')) || '';
+    const fotoLinha = linhas.find(l => l.toLowerCase().startsWith('foto:')) || '';
+
+    const link = linkLinha.replace(/^link:\s*/i, '').trim();
+    const fotoUrl = fotoLinha.replace(/^foto:\s*/i, '').trim();
+
+    const ok = !titulo.startsWith('❌') && precoLinha && !precoLinha.includes('❌');
+    const badge = ok ? '<span class="badge ok">OK</span>' : '<span class="badge err">ERRO</span>';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const fotoHtml = fotoUrl
+      ? `<div class="foto">
+           <a href="${escAttr(fotoUrl)}" target="_blank" rel="noopener noreferrer">
+             <img src="${escAttr(fotoUrl)}" alt="Foto do produto">
+           </a>
+         </div>`
+      : '';
+
+    const baixarBtn = fotoUrl
+      ? `<button class="btn" data-action="baixar" data-foto="${escAttr(fotoUrl)}" data-nome="${escAttr(titulo)}">Baixar foto</button>`
+      : `<button class="btn" disabled>Sem foto</button>`;
+
+    card.innerHTML = `
+      <div class="line">${badge}</div>
+      <h3>${esc(titulo)}</h3>
+      ${fotoHtml}
+      <div class="line">Link: <a href="${escAttr(link)}" target="_blank" rel="noopener noreferrer">${esc(link)}</a></div>
+      <div class="line" data-preco>${esc(precoLinha)}</div>
+      <div class="actions">
+        <button class="btn primary" data-action="copiar">Copiar mensagem</button>
+        ${baixarBtn}
+      </div>
+    `;
+
+    card.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+
+      const action = btn.getAttribute('data-action');
+      if (action === 'copiar') {
+        const msg = `${titulo}\nLink: ${link}\n${precoLinha}\n\n${AVISO}`;
+        try {
+          await navigator.clipboard.writeText(msg);
+          showToast('Mensagem copiada ✅');
+        } catch {
+          showToast('Falhou copiar ❌');
+        }
+      }
+
+      if (action === 'baixar') {
+        const url = btn.getAttribute('data-foto');
+        const nome = (btn.getAttribute('data-nome') || 'produto')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 60) || 'produto';
+        await baixarImagem(url, `${nome}.jpg`);
+      }
+    });
+
+    cards.appendChild(card);
+  });
+}
+
+// tenta baixar; se CORS bloquear, abre imagem em nova aba
+async function baixarImagem(url, filename) {
+  try {
+    const res = await fetch(url, { mode: 'cors' });
+    if (!res.ok) throw new Error('fetch failed');
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    showToast('Foto baixada ✅');
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    showToast('Imagem aberta (salve manualmente) ⚠️');
+  }
+}
+
+function esc(str){ return String(str).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;"); }
+function escAttr(str){ return esc(str).replaceAll(' ', '%20'); }
+</script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LinkGen (Teste) — Admin</title>
+  <link rel="stylesheet" href="./assets/css/app.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand side">
+        <div class="logo">LG</div>
+        <div>
+          <div class="brand-name">LinkGen</div>
+          <div class="brand-sub">admin (mock)</div>
+        </div>
+      </div>
+
+      <nav class="menu">
+        <a class="menu-item" href="./app.html"><span>Links</span></a>
+        <a class="menu-item active" href="./admin.html"><span>Admin</span><span class="badge">mock</span></a>
+        <div class="menu-sep"></div>
+        <a class="menu-item" href="./index.html"><span>Landing</span></a>
+      </nav>
+
+      <div class="side-footer">
+        <div class="muted small">Tudo aqui é <b>local</b> (teste)</div>
+        <button class="btn ghost full" id="btnReset">Resetar dados</button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="search">
+          <input id="q" placeholder="Buscar (título/url)..." />
+        </div>
+        <div class="top-actions">
+          <a class="btn ghost" href="./app.html">Abrir app</a>
+          <a class="btn" href="./index.html">Voltar</a>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Dashboard</h2>
+              <p class="muted">Painel admin <b>simulado</b> usando seu histórico local.</p>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat">
+              <div class="stat-num" id="k_total">0</div>
+              <div class="stat-label">itens no histórico</div>
+            </div>
+            <div class="stat">
+              <div class="stat-num" id="k_ok">0</div>
+              <div class="stat-label">OK (com preço)</div>
+            </div>
+            <div class="stat">
+              <div class="stat-num" id="k_err">0</div>
+              <div class="stat-label">ERRO / incompleto</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Links (mock)</h2>
+              <p class="muted">Busca e ações locais. (No futuro: ban, reprocessar, logs...)</p>
+            </div>
+          </div>
+
+          <div class="table">
+            <div class="table-head">
+              <div>Registro</div>
+              <div class="right">Ações</div>
+            </div>
+            <div id="list" class="table-body"></div>
+          </div>
+
+          <div id="emptyList" class="empty-list">
+            <div class="muted">Sem dados ainda. Gere algo no App.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="./assets/js/admin.js"></script>
+</body>
+</html>

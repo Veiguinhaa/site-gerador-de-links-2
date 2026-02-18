@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LinkGen (Teste) — Gerador de links</title>
+  <link rel="stylesheet" href="./assets/css/app.css" />
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <header class="topbar public">
+    <div class="brand">
+      <div class="logo">LG</div>
+      <div>
+        <div class="brand-name">LinkGen</div>
+        <div class="brand-sub">pasta teste (não afeta o site principal)</div>
+      </div>
+    </div>
+    <nav class="top-actions">
+      <a class="btn ghost" href="./app.html">Abrir app</a>
+      <a class="btn" href="./admin.html">Admin (mock)</a>
+    </nav>
+  </header>
+
+  <main class="public-wrap">
+    <section class="hero">
+      <div class="pill">Amazon OK • mesma API /processar • só UI nova</div>
+      <h1>Teste de interface SaaS (sem quebrar nada).</h1>
+      <p>
+        Essa pasta <b>/teste</b> roda em paralelo ao seu site atual. Ela usa o mesmo endpoint
+        <code>/processar</code> (extrair.js), então o comportamento de extração permanece igual —
+        só muda a “cara” do app.
+      </p>
+
+      <div class="hero-actions">
+        <a class="btn big" href="./app.html">Ir pro App</a>
+        <a class="btn ghost big" href="./admin.html">Ir pro Admin</a>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-num">0</div>
+          <div class="stat-label">alterações no app principal</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num">1</div>
+          <div class="stat-label">endpoint reutilizado</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num">100%</div>
+          <div class="stat-label">reversível</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="public-card">
+      <h2>Como acessar</h2>
+      <ol class="steps">
+        <li><b>Site atual:</b> <code>/</code></li>
+        <li><b>Teste (landing):</b> <code>/teste/</code></li>
+        <li><b>Teste (app):</b> <code>/teste/app.html</code></li>
+        <li><b>Teste (admin):</b> <code>/teste/admin.html</code></li>
+      </ol>
+      <p class="muted">Dica: se você usa PIN (ACCESS_PIN), o <code>/processar</code> continua protegido do mesmo jeito.</p>
+    </section>
+  </main>
+
+  <footer class="public-footer">
+    <span class="muted">LinkGen • ambiente de testes</span>
+  </footer>
+</body>
+</html>
