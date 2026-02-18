@@ -62,12 +62,13 @@ function jitter(ms, pct = 0.35) {
   return Math.floor(min + Math.random() * (max - min));
 }
 
-// Cadência “humana” entre requests (ótimo pra 10 links)
+// ✅ delay “humano” p/ lote (10 links)
 async function politeDelay() {
   // ~4s a 8s
   await sleep(jitter(6000, 0.35));
 }
 
+// ✅ Detecta bloqueio/captcha/consent
 function isBlockedHtml(html) {
   const h = String(html || '').toLowerCase();
   return (
@@ -83,7 +84,7 @@ function isBlockedHtml(html) {
 }
 
 function detectSite(link, html) {
-  const l = link.toLowerCase();
+  const l = String(link || '').toLowerCase();
   const h = String(html || '').toLowerCase();
 
   if (l.includes('mercadolivre.') || l.includes('mercadolibre.') || h.includes('mercadolivre') || h.includes('mercadolibre')) {
@@ -96,8 +97,52 @@ function detectSite(link, html) {
 }
 
 /**
- * ✅ Mantém o “motor” igual ao que funcionava (axios simples),
- * mas adiciona: delay + retries + backoff + finalUrl.
+ * ✅ NOVO: normaliza QUALQUER link da Amazon (curto ou cheio)
+ * para o formato limpo: https://www.amazon.com.br/dp/ASIN
+ * Remove query gigante (?tag=...&pd_rd...).
+ */
+function normalizeAmazonUrl(input) {
+  if (!input) return input;
+
+  try {
+    const u = new URL(String(input).trim());
+    const host = u.hostname.toLowerCase();
+
+    // Só mexe se for Amazon
+    if (!host.includes('amazon.')) return input;
+
+    const path = u.pathname;
+
+    // /dp/ASIN ou /gp/product/ASIN
+    let m = path.match(/\/dp\/([A-Z0-9]{10})/i);
+    if (!m) m = path.match(/\/gp\/product\/([A-Z0-9]{10})/i);
+
+    // Às vezes vem em query (ex: pd_rd_i=B01...)
+    if (!m) {
+      const qAsin =
+        u.searchParams.get('asin') ||
+        u.searchParams.get('ASIN') ||
+        u.searchParams.get('pd_rd_i') ||
+        '';
+      if (/^[A-Z0-9]{10}$/i.test(qAsin)) m = [null, qAsin];
+    }
+
+    if (m && m[1]) {
+      const asin = m[1].toUpperCase();
+      const origin = `${u.protocol}//${u.host}`;
+      return `${origin}/dp/${asin}`;
+    }
+
+    // Se não achou ASIN, ao menos remove query (ajuda um pouco)
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return input;
+  }
+}
+
+/**
+ * Busca HTML seguindo redirects e retorna também a URL FINAL.
+ * Mantém axios simples (igual o que funcionava), mas com cadência + retries.
  */
 async function fetchHtmlWithRetry(url, tries = 3) {
   let lastErr = null;
@@ -123,10 +168,9 @@ async function fetchHtmlWithRetry(url, tries = 3) {
 
       const html = resp.data;
 
-      // Se veio bloqueio, backoff e tenta de novo
       if (isBlockedHtml(html)) {
         lastErr = new Error('BLOCKED_HTML');
-        await sleep(7000 + i * 4500); // 7s, 11.5s, 16s...
+        await sleep(7000 + i * 4500);
         continue;
       }
 
@@ -140,7 +184,7 @@ async function fetchHtmlWithRetry(url, tries = 3) {
   throw lastErr;
 }
 
-// ======================= AMAZON (NÃO mexer em seletores, só baseUrl + avisos) =======================
+// ======================= AMAZON (seletores mantidos) =======================
 function amazonGetPrice($) {
   let price = pickFirstText($, [
     'span.a-price.aok-align-center.reinventPricePriceToPayMargin span.a-offscreen',
@@ -220,7 +264,6 @@ async function extrairAmazon(baseUrl, html) {
   }
 
   const desconto = calcularDesconto(precoDe, precoAtual);
-
   const falhouTitulo = !titulo;
   const falhouPreco = !precoAtual;
 
@@ -238,7 +281,7 @@ async function extrairAmazon(baseUrl, html) {
   };
 }
 
-// ======================= MERCADO LIVRE (igual ao seu) =======================
+// ======================= MERCADO LIVRE (SEC + JSON-LD) =======================
 function parseJsonLdProduct($) {
   const scripts = $('script[type="application/ld+json"]');
   for (let i = 0; i < scripts.length; i++) {
@@ -357,11 +400,23 @@ async function extrairML(originalLink) {
 }
 
 async function extrair(link) {
+  // 1) Busca seguindo redirects (amzn.to vira URL final)
   const { html, finalUrl } = await fetchHtmlWithRetry(link, 2);
-  const site = detectSite(finalUrl || link, html);
 
-  if (site === 'amazon') return await extrairAmazon(finalUrl || link, html);
-  if (site === 'ml') return await extrairML(finalUrl || link);
+  // 2) Normaliza links da Amazon (curto OU cheio) => /dp/ASIN sem query
+  const amazonClean = normalizeAmazonUrl(finalUrl || link);
+
+  // 3) Detecta site com base no link já limpo
+  const site = detectSite(amazonClean || finalUrl || link, html);
+
+  if (site === 'amazon') {
+    // Amazon usa baseUrl limpa (ajuda foto/links e padroniza)
+    return await extrairAmazon(amazonClean, html);
+  }
+
+  if (site === 'ml') {
+    return await extrairML(finalUrl || link);
+  }
 
   return {
     titulo: '❌ Site não suportado',
@@ -404,20 +459,21 @@ ${d.foto ? `Foto: ${d.foto}` : ''}${avisoNovoLink}
 
 `;
     } catch (err) {
-      // ✅ Agora mostra o motivo real (pra não ficar “cego”)
-      const msg = err?.message || String(err);
       const status = err?.response?.status;
+      const code = err?.code;
+      const msg = err?.message || String(err);
+
       resultado +=
 `❌ Erro ao acessar:
 Link: ${link}
-Detalhes: ${status ? `HTTP ${status} - ` : ''}${msg}
+Detalhes: ${status ? `HTTP ${status} - ` : ''}${code ? `${code} - ` : ''}${msg}
 
 ⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.
 
 `;
     }
 
-    // ✅ pausa extra a cada 3 links (pra lote de 10)
+    // ✅ pausa extra a cada 3 links (pra você enviar 10 de uma vez)
     if (count % 3 === 0 && count < links.length) {
       await sleep(12000);
     }
