@@ -2,6 +2,13 @@ const readline = require('readline');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// ✅ NOVO (cookie jar p/ reduzir consent/robot em lote)
+const { CookieJar } = require('tough-cookie');
+const { wrapper } = require('axios-cookiejar-support');
+
+// ============================================================================
+// Utils
+// ============================================================================
 function normalizarNumero(valor) {
   if (!valor) return NaN;
   return parseFloat(
@@ -55,7 +62,7 @@ async function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ✅ Detecta quando o HTML não é uma página de produto, mas sim bloqueio/consent/captcha
+// ✅ Detecta bloqueio/captcha/consent
 function isBlockedHtml(html) {
   const h = String(html || '').toLowerCase();
   return (
@@ -66,47 +73,13 @@ function isBlockedHtml(html) {
     h.includes('to discuss automated access') ||
     h.includes('enter the characters you see below') ||
     h.includes('sorry, we just need to make sure') ||
-    h.includes('enable cookies') ||
-    h.includes('consent') && h.includes('privacy') // pages de consent também atrapalham
+    (h.includes('consent') && h.includes('privacy')) ||
+    (h.includes('enable cookies') && h.includes('browser'))
   );
 }
 
-/**
- * Busca HTML seguindo redirects e retorna também a URL FINAL.
- */
-async function fetchHtmlWithRetry(url, tries = 3) {
-  let lastErr = null;
-
-  for (let i = 0; i < tries; i++) {
-    try {
-      const resp = await axios.get(url, {
-        maxRedirects: 20,
-        timeout: 30000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.7',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-        }
-      });
-
-      const finalUrl =
-        resp?.request?.res?.responseUrl ||
-        resp?.request?.path ||
-        url;
-
-      return { html: resp.data, finalUrl, status: resp.status, headers: resp.headers };
-    } catch (e) {
-      lastErr = e;
-      await sleep(800 + i * 1000);
-    }
-  }
-  throw lastErr;
-}
-
 function detectSite(link, html) {
-  const l = link.toLowerCase();
+  const l = String(link || '').toLowerCase();
   const h = String(html || '').toLowerCase();
 
   if (l.includes('mercadolivre.') || l.includes('mercadolibre.') || h.includes('mercadolivre') || h.includes('mercadolibre')) {
@@ -120,7 +93,80 @@ function detectSite(link, html) {
   return 'unknown';
 }
 
-// ======================= AMAZON (NÃO MEXER — MANTIDO) =======================
+// ============================================================================
+// ✅ NOVO: axios client com cookie jar + headers mais “browser”
+// ============================================================================
+const jar = new CookieJar();
+const http = wrapper(axios.create({
+  jar,
+  withCredentials: true,
+  maxRedirects: 20,
+  timeout: 30000,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.7',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Referer': 'https://www.google.com/'
+  }
+}));
+
+function jitter(ms, pct = 0.35) {
+  const delta = ms * pct;
+  const min = ms - delta;
+  const max = ms + delta;
+  return Math.floor(min + Math.random() * (max - min));
+}
+
+async function politeDelay() {
+  // ✅ principal ganho p/ processar ~10 links sem “metralhar”
+  await sleep(jitter(3000, 0.35)); // ~2.0s a 4.0s
+}
+
+/**
+ * ✅ Atualizado:
+ * - cookie jar (menos consent/robot)
+ * - delay entre requests (anti-bloqueio)
+ * - retry/backoff quando bloqueado ou erro de rede
+ */
+async function fetchHtmlWithRetry(url, tries = 3) {
+  let lastErr = null;
+
+  for (let i = 0; i < tries; i++) {
+    try {
+      await politeDelay();
+
+      const resp = await http.get(url);
+
+      const finalUrl =
+        resp?.request?.res?.responseUrl ||
+        resp?.request?.path ||
+        url;
+
+      const html = resp.data;
+
+      // Se vier bloqueio, backoff maior e tenta de novo
+      if (isBlockedHtml(html)) {
+        lastErr = new Error('BLOCKED_HTML');
+        await sleep(5000 + i * 3500); // 5s, 8.5s, 12s...
+        continue;
+      }
+
+      return { html, finalUrl, status: resp.status, headers: resp.headers };
+    } catch (e) {
+      lastErr = e;
+      // backoff leve para erros/transientes
+      await sleep(1200 + i * 1800);
+    }
+  }
+
+  throw lastErr;
+}
+
+// ============================================================================
+// AMAZON (mantido: seletores; só melhoramos ao redor)
+// ============================================================================
 function amazonGetPrice($) {
   let price = pickFirstText($, [
     'span.a-price.aok-align-center.reinventPricePriceToPayMargin span.a-offscreen',
@@ -170,9 +216,8 @@ function amazonGetOldPrice($) {
   ]);
 }
 
-// ✅ Pequena mudança: usar baseUrl (finalUrl) ao invés do link curto
+// ✅ usa baseUrl = URL final (resolve amzn.to) + aviso “gere outro link”
 async function extrairAmazon(baseUrl, html) {
-  // Se vier bloqueio/captcha/consent, retorna aviso claro
   if (isBlockedHtml(html)) {
     return {
       titulo: '❌ Amazon bloqueou a leitura (anti-bot)',
@@ -202,15 +247,12 @@ async function extrairAmazon(baseUrl, html) {
   }
 
   const desconto = calcularDesconto(precoDe, precoAtual);
-
-  // ✅ Mensagem padrão quando falhar leitura
   const falhouTitulo = !titulo;
   const falhouPreco = !precoAtual;
 
   let linhaPreco = `*Preço: ${precoAtual || '❌ Não foi possível ler o preço'}*`;
   if (precoDe && desconto && precoAtual) linhaPreco = `*Preço: ${precoAtual} (De: ${precoDe} | ${desconto})*`;
 
-  // ✅ Se falhou título ou preço, pede novo link (ou link completo)
   const precisaGerarOutroLink = falhouTitulo || falhouPreco;
 
   return {
@@ -222,7 +264,9 @@ async function extrairAmazon(baseUrl, html) {
   };
 }
 
-// ======================= MERCADO LIVRE (SEC + JSON-LD) =======================
+// ============================================================================
+// MERCADO LIVRE (igual, só herda o novo fetch com delay/jar)
+// ============================================================================
 function parseJsonLdProduct($) {
   const scripts = $('script[type="application/ld+json"]');
   for (let i = 0; i < scripts.length; i++) {
@@ -340,13 +384,14 @@ async function extrairML(originalLink) {
   return { titulo, linhaPreco, foto, precisaGerarOutroLink, motivo: precisaGerarOutroLink ? 'PARSE_FAILED' : '' };
 }
 
+// ============================================================================
+// Orquestração
+// ============================================================================
 async function extrair(link) {
-  // ✅ pega HTML e URL final (resolve amzn.to)
   const { html, finalUrl } = await fetchHtmlWithRetry(link, 2);
   const site = detectSite(finalUrl || link, html);
 
   if (site === 'amazon') {
-    // ✅ usa URL final como base
     return await extrairAmazon(finalUrl || link, html);
   }
 
