@@ -62,7 +62,12 @@ function jitter(ms, pct = 0.35) {
   return Math.floor(min + Math.random() * (max - min));
 }
 
-// ✅ Detecta bloqueio/captcha/consent
+// Cadência “humana” entre requests (ótimo pra 10 links)
+async function politeDelay() {
+  // ~4s a 8s
+  await sleep(jitter(6000, 0.35));
+}
+
 function isBlockedHtml(html) {
   const h = String(html || '').toLowerCase();
   return (
@@ -73,35 +78,26 @@ function isBlockedHtml(html) {
     h.includes('to discuss automated access') ||
     h.includes('enter the characters you see below') ||
     h.includes('sorry, we just need to make sure') ||
-    (h.includes('consent') && h.includes('privacy')) ||
-    (h.includes('enable cookies') && h.includes('browser'))
+    (h.includes('consent') && h.includes('privacy'))
   );
 }
 
 function detectSite(link, html) {
-  const l = String(link || '').toLowerCase();
+  const l = link.toLowerCase();
   const h = String(html || '').toLowerCase();
 
   if (l.includes('mercadolivre.') || l.includes('mercadolibre.') || h.includes('mercadolivre') || h.includes('mercadolibre')) {
     return 'ml';
   }
-
   if (l.includes('amazon.') || l.includes('amzn.to') || h.includes('amazon')) {
     return 'amazon';
   }
-
   return 'unknown';
 }
 
-// ✅ delay “humano” (bom pra enviar 10 links de uma vez)
-async function politeDelay() {
-  // ~4s a 8s
-  await sleep(jitter(6000, 0.35));
-}
-
 /**
- * Busca HTML seguindo redirects e retorna também a URL FINAL.
- * Sem cookie jar (estável), mas com delay + retry/backoff.
+ * ✅ Mantém o “motor” igual ao que funcionava (axios simples),
+ * mas adiciona: delay + retries + backoff + finalUrl.
  */
 async function fetchHtmlWithRetry(url, tries = 3) {
   let lastErr = null;
@@ -113,15 +109,10 @@ async function fetchHtmlWithRetry(url, tries = 3) {
       const resp = await axios.get(url, {
         maxRedirects: 20,
         timeout: 30000,
-        // importante: alguns ambientes com proxy quebram o axios; isso evita proxy automático
-        proxy: false,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
           'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.7',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'Referer': 'https://www.google.com/'
         }
       });
 
@@ -132,24 +123,24 @@ async function fetchHtmlWithRetry(url, tries = 3) {
 
       const html = resp.data;
 
-      // se veio bloqueio, espera mais e tenta de novo
+      // Se veio bloqueio, backoff e tenta de novo
       if (isBlockedHtml(html)) {
         lastErr = new Error('BLOCKED_HTML');
-        await sleep(7000 + i * 4500);
+        await sleep(7000 + i * 4500); // 7s, 11.5s, 16s...
         continue;
       }
 
-      return { html, finalUrl, status: resp.status, headers: resp.headers };
+      return { html, finalUrl, status: resp.status };
     } catch (e) {
       lastErr = e;
-      await sleep(1400 + i * 2000);
+      await sleep(1200 + i * 1800);
     }
   }
 
   throw lastErr;
 }
 
-// ======================= AMAZON (mantido) =======================
+// ======================= AMAZON (NÃO mexer em seletores, só baseUrl + avisos) =======================
 function amazonGetPrice($) {
   let price = pickFirstText($, [
     'span.a-price.aok-align-center.reinventPricePriceToPayMargin span.a-offscreen',
@@ -229,6 +220,7 @@ async function extrairAmazon(baseUrl, html) {
   }
 
   const desconto = calcularDesconto(precoDe, precoAtual);
+
   const falhouTitulo = !titulo;
   const falhouPreco = !precoAtual;
 
@@ -246,7 +238,7 @@ async function extrairAmazon(baseUrl, html) {
   };
 }
 
-// ======================= MERCADO LIVRE (igual) =======================
+// ======================= MERCADO LIVRE (igual ao seu) =======================
 function parseJsonLdProduct($) {
   const scripts = $('script[type="application/ld+json"]');
   for (let i = 0; i < scripts.length; i++) {
@@ -399,7 +391,7 @@ rl.on('close', async () => {
       const d = await extrair(link);
 
       const avisoNovoLink = d.precisaGerarOutroLink
-        ? '\n⚠️ Não consegui ler corretamente. Tente novamente daqui a 1 minuto, ou use o link completo (amazon.com.br/dp/ASIN).'
+        ? '\n⚠️ Não consegui ler corretamente. Tente novamente em 1 minuto, ou use o link completo (amazon.com.br/dp/ASIN).'
         : '';
 
       resultado +=
@@ -412,18 +404,20 @@ ${d.foto ? `Foto: ${d.foto}` : ''}${avisoNovoLink}
 
 `;
     } catch (err) {
+      // ✅ Agora mostra o motivo real (pra não ficar “cego”)
       const msg = err?.message || String(err);
+      const status = err?.response?.status;
       resultado +=
 `❌ Erro ao acessar:
 Link: ${link}
-Detalhes: ${msg}
+Detalhes: ${status ? `HTTP ${status} - ` : ''}${msg}
 
 ⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.
 
 `;
     }
 
-    // ✅ pausa extra a cada 3 links (pra enviar 10 de uma vez)
+    // ✅ pausa extra a cada 3 links (pra lote de 10)
     if (count % 3 === 0 && count < links.length) {
       await sleep(12000);
     }
