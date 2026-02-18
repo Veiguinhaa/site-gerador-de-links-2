@@ -2,7 +2,6 @@ const readline = require('readline');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-// ✅ NOVO (cookie jar p/ reduzir consent/robot em lote)
 const { CookieJar } = require('tough-cookie');
 const { wrapper } = require('axios-cookiejar-support');
 
@@ -94,7 +93,7 @@ function detectSite(link, html) {
 }
 
 // ============================================================================
-// ✅ NOVO: axios client com cookie jar + headers mais “browser”
+// ✅ HTTP client com cookie jar + headers
 // ============================================================================
 const jar = new CookieJar();
 const http = wrapper(axios.create({
@@ -119,16 +118,17 @@ function jitter(ms, pct = 0.35) {
   return Math.floor(min + Math.random() * (max - min));
 }
 
+// ✅ delay “humano” para lote de 10
 async function politeDelay() {
-  // ✅ principal ganho p/ processar ~10 links sem “metralhar”
-  await sleep(jitter(3000, 0.35)); // ~2.0s a 4.0s
+  // ~4s a 8s
+  await sleep(jitter(6000, 0.35));
 }
 
 /**
- * ✅ Atualizado:
- * - cookie jar (menos consent/robot)
- * - delay entre requests (anti-bloqueio)
- * - retry/backoff quando bloqueado ou erro de rede
+ * Busca HTML seguindo redirects e retorna também a URL FINAL.
+ * - cookie jar
+ * - delay humano
+ * - retry/backoff quando bloqueado
  */
 async function fetchHtmlWithRetry(url, tries = 3) {
   let lastErr = null;
@@ -149,15 +149,14 @@ async function fetchHtmlWithRetry(url, tries = 3) {
       // Se vier bloqueio, backoff maior e tenta de novo
       if (isBlockedHtml(html)) {
         lastErr = new Error('BLOCKED_HTML');
-        await sleep(5000 + i * 3500); // 5s, 8.5s, 12s...
+        await sleep(7000 + i * 4500); // 7s, 11.5s, 16s...
         continue;
       }
 
       return { html, finalUrl, status: resp.status, headers: resp.headers };
     } catch (e) {
       lastErr = e;
-      // backoff leve para erros/transientes
-      await sleep(1200 + i * 1800);
+      await sleep(1400 + i * 2000);
     }
   }
 
@@ -165,7 +164,7 @@ async function fetchHtmlWithRetry(url, tries = 3) {
 }
 
 // ============================================================================
-// AMAZON (mantido: seletores; só melhoramos ao redor)
+// AMAZON (seletores mantidos)
 // ============================================================================
 function amazonGetPrice($) {
   let price = pickFirstText($, [
@@ -216,7 +215,7 @@ function amazonGetOldPrice($) {
   ]);
 }
 
-// ✅ usa baseUrl = URL final (resolve amzn.to) + aviso “gere outro link”
+// ✅ baseUrl = URL final (resolve amzn.to)
 async function extrairAmazon(baseUrl, html) {
   if (isBlockedHtml(html)) {
     return {
@@ -247,6 +246,7 @@ async function extrairAmazon(baseUrl, html) {
   }
 
   const desconto = calcularDesconto(precoDe, precoAtual);
+
   const falhouTitulo = !titulo;
   const falhouPreco = !precoAtual;
 
@@ -265,7 +265,7 @@ async function extrairAmazon(baseUrl, html) {
 }
 
 // ============================================================================
-// MERCADO LIVRE (igual, só herda o novo fetch com delay/jar)
+// MERCADO LIVRE (SEC + JSON-LD)
 // ============================================================================
 function parseJsonLdProduct($) {
   const scripts = $('script[type="application/ld+json"]');
@@ -418,13 +418,16 @@ rl.on('close', async () => {
   const links = input.split('\n').map(l => l.trim()).filter(Boolean);
 
   let resultado = '';
+  let count = 0;
 
   for (const link of links) {
+    count++;
+
     try {
       const d = await extrair(link);
 
       const avisoNovoLink = d.precisaGerarOutroLink
-        ? '\n⚠️ Não consegui ler corretamente. Gere outro link (ou use o link completo do produto).'
+        ? '\n⚠️ Não consegui ler corretamente. Tente novamente daqui a 1 minuto, ou use o link completo (amazon.com.br/dp/ASIN).'
         : '';
 
       resultado +=
@@ -444,6 +447,11 @@ Link: ${link}
 ⚠️ Preço sujeito a alteração a qualquer momento. Garanta antes que acabe.
 
 `;
+    }
+
+    // ✅ pausa extra a cada 3 links (pra você enviar 10 de uma vez)
+    if (count % 3 === 0 && count < links.length) {
+      await sleep(12000);
     }
   }
 
